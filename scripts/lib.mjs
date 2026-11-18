@@ -79,6 +79,9 @@ export function validateConfig(config) {
       if (g.scoreHint !== undefined && (typeof g.scoreHint !== 'string' || g.scoreHint.length > 200)) {
         errors.push(`${at}.scoreHint must be a short string`);
       }
+      if (g.puzzleDay1 !== undefined && !isRealDate(g.puzzleDay1)) {
+        errors.push(`${at}.puzzleDay1 must be the YYYY-MM-DD date of puzzle #1`);
+      }
       if (!Array.isArray(g.modes) || g.modes.length === 0) {
         errors.push(`${at}.modes must be a non-empty array`);
       } else {
@@ -249,37 +252,129 @@ export function addScores(config, data, { gameMode, scoresText, dateText, replac
   }
   const date = resolveDate(dateText, config.timezone, now);
   const pairs = parseScoreList(config, scoresText);
-  const name = (pid) => config.players.find((p) => p.id === pid).name;
+  const items = pairs.map(({ player, score }) => ({ player, game: game.id, mode: mode.id, date, score }));
+  const { data: next, changes } = applyEntries(config, data, items, replace);
+  return { data: next, game, mode, date, changes };
+}
 
-  for (const { player, score } of pairs) {
-    if (score > game.maxScore) {
+/**
+ * Insert or (with `replace`) overwrite scores. items: [{player, game, mode, date, score}]
+ * with known player/game/mode. All-or-nothing: throws before changing anything.
+ */
+function applyEntries(config, data, items, replace) {
+  const name = (pid) => config.players.find((p) => p.id === pid).name;
+  const label = (it) => {
+    const game = config.games.find((g) => g.id === it.game);
+    const mode = game.modes.find((m) => m.id === it.mode);
+    return { game, text: game.modes.length > 1 ? `${game.name} ${mode.name}` : game.name };
+  };
+
+  for (const it of items) {
+    const { game } = label(it);
+    if (it.score > game.maxScore) {
       const hint = game.scoreHint ? ` ${game.scoreHint}` : '';
-      throw new UserError(`${name(player)}'s ${score} is above the ${game.name} max of ${game.maxScore}.${hint}`);
+      throw new UserError(`${name(it.player)}'s ${it.score} is above the ${game.name} max of ${game.maxScore}.${hint}`);
     }
   }
 
   const entries = [...data.entries];
   const taken = new Set(entries.map((e) => e.id));
   const changes = [];
-  for (const { player, score } of pairs) {
-    const idx = entries.findIndex((e) => e.date === date && e.player === player && e.game === game.id && e.mode === mode.id);
+  for (const it of items) {
+    const { text } = label(it);
+    const idx = entries.findIndex((e) => e.date === it.date && e.player === it.player && e.game === it.game && e.mode === it.mode);
     if (idx >= 0) {
       const existing = entries[idx];
       if (!replace) {
         throw new UserError(
-          `${name(player)} already has a ${game.name} ${mode.name} score on ${date} (${existing.score}). Tick "replace" to overwrite it.`,
+          `${name(it.player)} already has a ${text} score on ${it.date} (${existing.score}). Tick "replace" to overwrite it.`,
         );
       }
-      entries[idx] = { ...existing, score };
-      changes.push({ ...entries[idx], name: name(player), previous: existing.score });
+      entries[idx] = { ...existing, score: it.score };
+      changes.push({ ...entries[idx], name: name(it.player), label: text, previous: existing.score });
     } else {
-      const entry = { id: newId(taken), date, player, game: game.id, mode: mode.id, score };
+      const entry = { id: newId(taken), date: it.date, player: it.player, game: it.game, mode: it.mode, score: it.score };
       taken.add(entry.id);
       entries.push(entry);
-      changes.push({ ...entry, name: name(player) });
+      changes.push({ ...entry, name: name(it.player), label: text });
     }
   }
-  return { data: { ...data, entries: sortEntries(entries) }, game, mode, date, changes };
+  return { data: { ...data, entries: sortEntries(entries) }, changes };
+}
+
+// ---------------------------------------------------------------------------
+// Share text: the line each game copies when you tap Share/Copy on a daily result.
+//   TopBinz:  "TOPBINZ #20 · NICHE · 540 pts · as Haaland · 🔥3"   (no "· NICHE" for Normal)
+//   Krillion: "Krillion #126 🦐 420  🟦🟪⬛…"
+// The puzzle number gives the day: #1 is the game's `puzzleDay1` in config.json.
+// Archive and Unlimited results use a different header and are ignored.
+// GitHub's form strips line breaks, so these also work when several results run together.
+// ---------------------------------------------------------------------------
+
+const SEP = '\\s*[·•|-]\\s*';
+const SHARE_PARSERS = {
+  topbinz: {
+    re: new RegExp(`TOPBINZ\\s*#(\\d{1,5})(${SEP}NICHE)?${SEP}(\\d{1,6})\\s*pts`, 'giu'),
+    read: (m) => ({ puzzle: Number(m[1]), mode: m[2] ? 'niche' : 'normal', score: Number(m[3]) }),
+  },
+  krillion: {
+    re: /Krillion\s+#(\d{1,5})\s+(?:\p{Extended_Pictographic}️?\s*)?(\d{1,4})(?!\d)/giu,
+    read: (m) => ({ puzzle: Number(m[1]), mode: 'daily', score: Number(m[2]) }),
+  },
+};
+const NOT_DAILY_RE = /TOPBINZ\s*(?:∞|#\d+\s*[·•|-]\s*ARCHIVE)|Krillion\s*[⟲∞]/iu;
+
+/** Find every daily result in pasted share text. Returns [{game, mode, date, score, puzzle}]. */
+export function parseShareText(config, text) {
+  const raw = String(text ?? '');
+  if (!raw.trim()) throw new UserError('Paste the text from the Share or Copy button on your daily results screen.');
+  if (raw.length > MAX_INPUT * 3) throw new UserError('That paste is too long. Paste just the share text.');
+
+  const found = new Map();
+  for (const game of config.games) {
+    const parser = SHARE_PARSERS[game.id];
+    if (!parser || !game.puzzleDay1) continue;
+    for (const m of raw.matchAll(parser.re)) {
+      const r = parser.read(m);
+      if (!game.modes.some((x) => x.id === r.mode)) continue;
+      if (r.puzzle < 1) throw new UserError(`${game.name} #${r.puzzle} isn't a real puzzle number.`);
+      const date = addDays(game.puzzleDay1, r.puzzle - 1);
+      const key = `${game.id}/${r.mode}/${date}`;
+      const prev = found.get(key);
+      if (prev && prev.score !== r.score) {
+        throw new UserError(`The paste has two different scores for ${game.name} #${r.puzzle} (${prev.score} and ${r.score}).`);
+      }
+      found.set(key, { game: game.id, mode: r.mode, date, score: r.score, puzzle: r.puzzle });
+    }
+  }
+
+  if (!found.size) {
+    if (NOT_DAILY_RE.test(raw)) throw new UserError('That looks like an Archive or Unlimited result. Only Daily results count.');
+    throw new UserError(
+      "Couldn't find a TopBinz or Krillion daily result. On the results screen tap Share (or Copy) and paste that text. It should start with \"TOPBINZ #\" or \"Krillion #\".",
+    );
+  }
+  return [...found.values()];
+}
+
+/** Record one player's pasted daily results (any mix of games and modes). */
+export function addResults(config, data, { playerText, resultsText, replace = false, now = new Date() }) {
+  if (!String(playerText ?? '').trim()) throw new UserError('Type the player name the results belong to.');
+  const player = findPlayer(config, playerText);
+  if (!player) {
+    const known = config.players.map((p) => p.name).join(', ') || 'none yet';
+    throw new UserError(`Unknown player "${safe(playerText)}". Known players: ${known}. Add new friends with the "Add player" workflow first.`);
+  }
+  const results = parseShareText(config, resultsText);
+  const latest = addDays(todayIn(config.timezone, now), 1);
+  for (const r of results) {
+    const game = config.games.find((g) => g.id === r.game);
+    if (r.date > latest) throw new UserError(`${game.name} #${r.puzzle} is for ${r.date}, which hasn't happened yet.`);
+    if (r.date < EARLIEST_DATE) throw new UserError(`${game.name} #${r.puzzle} is too far in the past.`);
+  }
+  const items = results.map((r) => ({ player: player.id, game: r.game, mode: r.mode, date: r.date, score: r.score }));
+  const { data: next, changes } = applyEntries(config, data, items, replace);
+  return { data: next, player, changes: changes.map((c, i) => ({ ...c, puzzle: results[i].puzzle })) };
 }
 
 export function removeEntry(data, idText) {

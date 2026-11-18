@@ -120,7 +120,7 @@ function emptyState(message) {
     'div',
     { class: 'empty' },
     h('p', {}, message),
-    externalLink(workflowUrl('add-scores.yml'), 'Add scores ↗'),
+    externalLink(workflowUrl('paste-results.yml'), 'Paste a result ↗'),
   );
 }
 
@@ -311,8 +311,8 @@ function renderChrome() {
     ...parts.flatMap((part, i) => (i === 0 ? [part] : [h('span', { class: 'x' }, '×'), part])),
   );
 
-  const add = document.getElementById('add-link');
-  add.href = safeHref(workflowUrl('add-scores.yml'));
+  document.getElementById('paste-link').href = safeHref(workflowUrl('paste-results.yml'));
+  document.getElementById('add-link').href = safeHref(workflowUrl('add-scores.yml'));
 
   const latest = entries.reduce((max, e) => (e.date > max ? e.date : max), '');
   document.getElementById('updated').textContent = latest

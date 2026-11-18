@@ -4,8 +4,10 @@ import { test } from 'node:test';
 import {
   UserError,
   addPlayer,
+  addResults,
   addScores,
   parseScoreList,
+  parseShareText,
   removeEntry,
   resolveDate,
   safe,
@@ -77,7 +79,7 @@ test('a second score for the same day needs "replace"', () => {
   const first = addScores(config, empty, { gameMode: 'krillion/daily', scoresText: 'Aayush 300', dateText: '2026-11-17', now: NOW });
   userError(
     () => addScores(config, first.data, { gameMode: 'krillion/daily', scoresText: 'Sam B 100, Aayush 310', dateText: '2026-11-17', now: NOW }),
-    /already has a Krillion Daily Dive score on 2026-11-17 \(300\)/,
+    /already has a Krillion score on 2026-11-17 \(300\)/,
   );
   const second = addScores(config, first.data, { gameMode: 'krillion/daily', scoresText: 'Aayush 310', dateText: '2026-11-17', replace: true, now: NOW });
   assert.equal(second.data.entries.length, 1);
@@ -142,6 +144,78 @@ test('validation catches tampered data', () => {
   assert.match(validateConfig({ ...config, players: [{ id: 'a', name: 'A', email: 'x' }] }).join(), /unexpected fields/);
   assert.match(validateConfig({ ...config, timezone: 'Mars/Olympus' }).join(), /timezone/);
   assert.match(validateConfig({ ...config, games: [{ ...config.games[0], url: 'javascript:alert(1)' }] }).join(), /https/);
+});
+
+// Share text exactly as each game builds it (see scripts/lib.mjs).
+const TB_NORMAL = 'TOPBINZ #20 · 410 pts · as Haaland · 🔥3\n🟩🟨🟥🟩🟩⬜🟨\n1. 80  2. 60  3. —  4. 90  5. 70  6. 40  7. 70\ntopbinz.io';
+const TB_NICHE = 'TOPBINZ #20 · NICHE · 540 pts · as Haaland\n🟩🟩🟨🟩🟩🟩🟨\n1. 80  2. 90  3. 70  4. 90  5. 70  6. 70  7. 70\ntopbinz.io';
+const KR_DAILY = 'Krillion #126 🦐 420  🟦🟪⬛🟦🟦🟪🟦  https://krillion.io';
+const shareConfig = {
+  ...config,
+  games: [
+    { ...config.games[0], puzzleDay1: '2026-10-30' },
+    { ...config.games[1], puzzleDay1: '2026-07-16' },
+  ],
+};
+
+test('share text: finds every daily result and dates it from the puzzle number', () => {
+  const expected = [
+    { game: 'topbinz', mode: 'normal', date: '2026-11-18', score: 410, puzzle: 20 },
+    { game: 'topbinz', mode: 'niche', date: '2026-11-18', score: 540, puzzle: 20 },
+    { game: 'krillion', mode: 'daily', date: '2026-11-18', score: 420, puzzle: 126 },
+  ];
+  const sort = (list) => [...list].sort((a, b) => `${a.game}${a.mode}`.localeCompare(`${b.game}${b.mode}`));
+  const pasted = `${TB_NORMAL}\n\n${TB_NICHE}\n${KR_DAILY}`;
+  assert.deepEqual(sort(parseShareText(shareConfig, pasted)), sort(expected));
+  // GitHub's single-line input drops line breaks, so results arrive glued together.
+  assert.deepEqual(sort(parseShareText(shareConfig, pasted.replace(/\n/g, ''))), sort(expected));
+  assert.deepEqual(parseShareText(shareConfig, 'TopBinz #1 · Niche · 5 pts'), [
+    { game: 'topbinz', mode: 'niche', date: '2026-10-30', score: 5, puzzle: 1 },
+  ]);
+});
+
+test('share text: archive, unlimited and junk are rejected', () => {
+  userError(() => parseShareText(shareConfig, 'TOPBINZ #12 · ARCHIVE · 300 pts · as Kane'), /Only Daily results count/);
+  userError(() => parseShareText(shareConfig, 'TOPBINZ ∞ · NICHE · 300 pts · as Kane'), /Only Daily results count/);
+  userError(() => parseShareText(shareConfig, 'Krillion ⟲ #12 🦐 300  🟦'), /Only Daily results count/);
+  userError(() => parseShareText(shareConfig, 'Krillion ∞ #3 🦐 300'), /Only Daily results count/);
+  userError(() => parseShareText(shareConfig, 'I got 500 today'), /Couldn't find a TopBinz or Krillion daily result/);
+  userError(() => parseShareText(shareConfig, ''), /Paste the text/);
+});
+
+test('share text: the same result twice is fine, two different scores is not', () => {
+  assert.equal(parseShareText(shareConfig, `${KR_DAILY} ${KR_DAILY}`).length, 1);
+  userError(() => parseShareText(shareConfig, `${KR_DAILY} Krillion #126 🦐 300`), /two different scores/);
+});
+
+test('pasted results are recorded for the named player', () => {
+  const r = addResults(shareConfig, empty, { playerText: 'sam b', resultsText: `${TB_NORMAL}${TB_NICHE}${KR_DAILY}`, now: NOW });
+  assert.equal(r.player.id, 'sam-b');
+  assert.equal(r.data.entries.length, 3);
+  assert.deepEqual(validateScores(shareConfig, r.data, '2026-11-18'), []);
+  assert.deepEqual(r.changes.map((c) => [c.label, c.puzzle, c.score]).sort(), [
+    ['Krillion', 126, 420],
+    ['TopBinz Niche', 20, 540],
+    ['TopBinz Normal', 20, 410],
+  ]);
+  userError(() => addResults(shareConfig, r.data, { playerText: 'Sam B', resultsText: KR_DAILY, now: NOW }), /already has a Krillion score on 2026-11-18/);
+  const again = addResults(shareConfig, r.data, { playerText: 'Sam B', resultsText: 'Krillion #126 🦐 455', replace: true, now: NOW });
+  assert.equal(again.data.entries.length, 3);
+  assert.equal(again.changes[0].previous, 420);
+});
+
+test('pasted results: future puzzles, unknown players and impossible scores are rejected', () => {
+  userError(() => addResults(shareConfig, empty, { playerText: 'Sam B', resultsText: 'TOPBINZ #30 · 100 pts', now: NOW }), /hasn't happened yet/);
+  userError(() => addResults(shareConfig, empty, { playerText: 'Mallory', resultsText: KR_DAILY, now: NOW }), /Unknown player/);
+  userError(() => addResults(shareConfig, empty, { playerText: '', resultsText: KR_DAILY, now: NOW }), /Type the player name/);
+  userError(() => addResults(shareConfig, empty, { playerText: 'Sam B', resultsText: 'Krillion #126 🦐 750', now: NOW }), /above the Krillion max of 700/);
+});
+
+test('the real config dates puzzles correctly', () => {
+  const real = JSON.parse(read('../site/data/config.json'));
+  const day = (text) => parseShareText(real, text)[0].date;
+  assert.equal(day('TOPBINZ #20 · 410 pts'), '2026-11-18');
+  assert.equal(day('Krillion #126 🦐 420'), '2026-11-18');
 });
 
 test('safe() strips anything that could break out of a log line', () => {

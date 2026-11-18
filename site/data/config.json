@@ -8,6 +8,7 @@
       "name": "TopBinz",
       "url": "https://topbinz.io",
       "maxScore": 100000,
+      "puzzleDay1": "2026-10-30",
       "modes": [
         {
           "id": "normal",
@@ -25,6 +26,7 @@
       "url": "https://krillion.io",
       "maxScore": 700,
       "scoreHint": "Krillion scores are points (max 700 a day). If you only have the depth in meters, divide it by 10.",
+      "puzzleDay1": "2026-07-16",
       "modes": [
         {
           "id": "daily",

@@ -1,0 +1,53 @@
+name: Paste results
+run-name: Paste results (${{ github.actor }})
+
+# Paste the text from the game's Share/Copy button. The game, mode, day and score
+# are all read from it. Only people with write access to this repo can run this.
+# Inputs reach the script through environment variables and are never pasted
+# into a shell command.
+on:
+  workflow_dispatch:
+    inputs:
+      player:
+        description: Whose results are these? (leaderboard nickname)
+        type: string
+        required: true
+      results:
+        description: 'Paste the share text from the results screen. You can paste TopBinz Normal, Niche and Krillion one after another.'
+        type: string
+        required: true
+      replace:
+        description: Overwrite a score that's already recorded for that day
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  record:
+    name: Record results
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Record results
+        env:
+          PLAYER: ${{ inputs.player }}
+          RESULTS: ${{ inputs.results }}
+          REPLACE: ${{ inputs.replace }}
+          ACTOR: ${{ github.actor }}
+        run: bash scripts/ci-commit.sh paste-results
+
+  deploy:
+    needs: record
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/deploy.yml

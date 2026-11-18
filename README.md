@@ -21,11 +21,23 @@ It's a static site on GitHub Pages. Scores live in [`site/data/scores.json`](sit
 
 ## Adding scores
 
-1. Go to **[Actions → Add scores](https://github.com/AayushNair10/topbinz-krillion-leaderboard/actions/workflows/add-scores.yml)** and click **Run workflow**. It works in a phone browser too.
+Neither game has a public API, so scores come in one of two ways. Both work in a phone browser.
+
+### Paste a result (easiest)
+
+1. On the game's daily results screen, tap **Share** (or **Copy**).
+2. Go to **[Actions → Paste results](https://github.com/AayushNair10/topbinz-krillion-leaderboard/actions/workflows/paste-results.yml)** and click **Run workflow**.
+3. Type the player's name and paste. You can paste TopBinz Normal, Niche and Krillion one after another in the same box.
+4. Run it. About a minute later the site has the new scores.
+
+The game, mode, day and score are all read from the share text, e.g. `TOPBINZ #20 · NICHE · 540 pts` or `Krillion #126 🦐 420`. The day comes from the puzzle number, so pasting yesterday's result files it under yesterday. Archive and Unlimited results are ignored. This needs the game set to English.
+
+### Type scores
+
+1. Go to **[Actions → Add scores](https://github.com/AayushNair10/topbinz-krillion-leaderboard/actions/workflows/add-scores.yml)** and click **Run workflow**.
 2. Pick the game and mode, e.g. `topbinz/niche`.
 3. Type everyone's scores at once: `Aayush 420, Sam 385, Riya 300`. Names aren't case-sensitive.
 4. Leave the date as `today`, or type `yesterday` or a date like `2026-11-17`.
-5. Run it. About a minute later the site has the new scores.
 
 > **Krillion:** enter **points** (max 700 a day). If you only have the depth in meters, divide by 10.
 

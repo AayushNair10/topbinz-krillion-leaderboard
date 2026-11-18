@@ -2,6 +2,7 @@
 // Change the scoreboard data. Run by the GitHub Actions workflows, or locally:
 //
 //   GAME_MODE=topbinz/niche SCORES="Aayush 420, Sam 385" node scripts/scores.mjs add-scores
+//   PLAYER=Aayush RESULTS="TOPBINZ #20 · NICHE · 540 pts" node scripts/scores.mjs paste-results
 //   ENTRY_ID=3fa9c01b node scripts/scores.mjs remove-entry
 //   PLAYER_NAME=Sam node scripts/scores.mjs add-player
 //
@@ -9,7 +10,7 @@
 // nothing typed into the form can be run as a command.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { todayIn } from '../site/leaderboard.js';
-import { UserError, addPlayer, addScores, removeEntry, safe, validateConfig, validateScores } from './lib.mjs';
+import { UserError, addPlayer, addResults, addScores, removeEntry, safe, validateConfig, validateScores } from './lib.mjs';
 
 const CONFIG = new URL('../site/data/config.json', import.meta.url);
 const SCORES = new URL('../site/data/scores.json', import.meta.url);
@@ -51,6 +52,28 @@ function run(cmd) {
         ].join('\n'),
       };
     }
+    case 'paste-results': {
+      const r = addResults(config, data, {
+        playerText: env.PLAYER,
+        resultsText: env.RESULTS,
+        replace: env.REPLACE === 'true',
+      });
+      check(config, r.data);
+      writeJSON(SCORES, r.data);
+      const line = (c) => `${c.label} #${c.puzzle} (${c.date}): ${c.score}${c.previous !== undefined ? ` (was ${c.previous})` : ''}`;
+      return {
+        message: `Add ${r.player.name}'s pasted results\n\n${r.changes.map(line).join('\n')}${by}`,
+        summary: [
+          `### ✅ ${r.player.name}'s results`,
+          '',
+          '| Game | Puzzle | Day | Score | Entry ID |',
+          '| --- | ---: | --- | ---: | --- |',
+          ...r.changes.map(
+            (c) => `| ${c.label} | #${c.puzzle} | ${c.date} | ${c.score}${c.previous !== undefined ? ` (was ${c.previous})` : ''} | \`${c.id}\` |`,
+          ),
+        ].join('\n'),
+      };
+    }
     case 'remove-entry': {
       const r = removeEntry(data, env.ENTRY_ID);
       check(config, r.data);
@@ -73,7 +96,7 @@ function run(cmd) {
       };
     }
     default:
-      throw new UserError('Usage: node scripts/scores.mjs <add-scores|remove-entry|add-player>');
+      throw new UserError('Usage: node scripts/scores.mjs <add-scores|paste-results|remove-entry|add-player>');
   }
 }
 

@@ -486,6 +486,18 @@ td.game-krillion {
   font-size: 13px;
 }
 
+.footer .add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  font-size: 14px;
+}
+
+.footer .add a:not(.button) {
+  color: var(--muted);
+}
+
 .button {
   display: inline-block;
   padding: 9px 16px;
