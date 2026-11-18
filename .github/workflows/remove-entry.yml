@@ -1,0 +1,40 @@
+name: Remove entry
+run-name: Remove entry ${{ inputs.entry_id }} (${{ github.actor }})
+
+# Fix a mistake: delete one score by its ID (shown on the site's History tab).
+on:
+  workflow_dispatch:
+    inputs:
+      entry_id:
+        description: Entry ID from the History tab (8 characters, e.g. 3fa9c01b)
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  remove:
+    name: Remove entry
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Remove entry
+        env:
+          ENTRY_ID: ${{ inputs.entry_id }}
+          ACTOR: ${{ github.actor }}
+        run: bash scripts/ci-commit.sh remove-entry
+
+  deploy:
+    needs: remove
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/deploy.yml

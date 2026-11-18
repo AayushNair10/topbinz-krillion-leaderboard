@@ -1,0 +1,62 @@
+name: Add scores
+run-name: Add ${{ inputs.game_mode }} scores (${{ github.actor }})
+
+# Only people with write access to this repo can run this. Inputs reach the
+# script through environment variables and are validated there; they are never
+# pasted into a shell command.
+on:
+  workflow_dispatch:
+    inputs:
+      game_mode:
+        description: Game and mode
+        type: choice
+        required: true
+        options:
+          - topbinz/normal
+          - topbinz/niche
+          - krillion/daily
+      scores:
+        description: 'Scores as "name score", comma-separated. Example: Aayush 420, Sam 385'
+        type: string
+        required: true
+      date:
+        description: 'Day played: YYYY-MM-DD, "today" or "yesterday"'
+        type: string
+        required: false
+        default: today
+      replace:
+        description: Overwrite a score that's already recorded for that day
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  record:
+    name: Record scores
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Record scores
+        env:
+          GAME_MODE: ${{ inputs.game_mode }}
+          SCORES: ${{ inputs.scores }}
+          DATE: ${{ inputs.date }}
+          REPLACE: ${{ inputs.replace }}
+          ACTOR: ${{ github.actor }}
+        run: bash scripts/ci-commit.sh add-scores
+
+  deploy:
+    needs: record
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/deploy.yml

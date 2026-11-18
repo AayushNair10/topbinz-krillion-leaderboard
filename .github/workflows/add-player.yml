@@ -1,0 +1,40 @@
+name: Add player
+run-name: Add player (${{ github.actor }})
+
+# Everything on the site is public, so use a nickname rather than a full name.
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: Nickname (1–24 letters, digits, spaces, dots, dashes or underscores)
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  add:
+    name: Add player
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Add player
+        env:
+          PLAYER_NAME: ${{ inputs.name }}
+          ACTOR: ${{ github.actor }}
+        run: bash scripts/ci-commit.sh add-player
+
+  deploy:
+    needs: add
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/deploy.yml

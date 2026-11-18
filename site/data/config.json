@@ -1,0 +1,42 @@
+{
+  "title": "TopBinz × Krillion",
+  "repo": "AayushNair10/topbinz-krillion-leaderboard",
+  "timezone": "America/New_York",
+  "games": [
+    {
+      "id": "topbinz",
+      "name": "TopBinz",
+      "url": "https://topbinz.io",
+      "maxScore": 100000,
+      "modes": [
+        {
+          "id": "normal",
+          "name": "Normal"
+        },
+        {
+          "id": "niche",
+          "name": "Niche"
+        }
+      ]
+    },
+    {
+      "id": "krillion",
+      "name": "Krillion",
+      "url": "https://krillion.io",
+      "maxScore": 700,
+      "scoreHint": "Krillion scores are points (max 700 a day). If you only have the depth in meters, divide it by 10.",
+      "modes": [
+        {
+          "id": "daily",
+          "name": "Daily Dive"
+        }
+      ]
+    }
+  ],
+  "players": [
+    {
+      "id": "aayush",
+      "name": "Aayush"
+    }
+  ]
+}

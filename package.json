@@ -1,0 +1,14 @@
+{
+  "name": "topbinz-krillion-leaderboard",
+  "private": true,
+  "type": "module",
+  "description": "Friends leaderboard for TopBinz and Krillion. Static site, no dependencies.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "test": "node --test",
+    "validate": "node scripts/validate.mjs"
+  }
+}
