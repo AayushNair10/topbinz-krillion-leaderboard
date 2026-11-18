@@ -316,7 +316,7 @@ function renderChrome() {
 
   const latest = entries.reduce((max, e) => (e.date > max ? e.date : max), '');
   document.getElementById('updated').textContent = latest
-    ? `${num.format(entries.length)} scores recorded · latest ${formatDate(latest, false)}`
+    ? `${num.format(entries.length)} ${entries.length === 1 ? 'score' : 'scores'} recorded · latest ${formatDate(latest, false)}`
     : 'No scores recorded yet';
 }
 
