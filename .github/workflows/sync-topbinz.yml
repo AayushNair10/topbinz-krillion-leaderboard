@@ -1,0 +1,50 @@
+name: Sync TopBinz league
+run-name: Sync TopBinz league
+
+# Every two hours, read today's Daily Strike (Normal) scores from your TopBinz
+# league and add any new ones. Needs the TOPBINZ_LEAGUE repository secret (your
+# 6-letter league code). Without it, the job does nothing.
+#
+# TopBinz days roll over at 02:00 UTC, so there are two runs shortly before that
+# to catch late players. GitHub can start scheduled runs a little late.
+on:
+  schedule:
+    - cron: "23 1-23/2 * * *"
+    - cron: "50 1 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: sync-topbinz
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync league scores
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.sync.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Sync league scores
+        id: sync
+        env:
+          TOPBINZ_LEAGUE: ${{ secrets.TOPBINZ_LEAGUE }}
+        run: bash scripts/ci-commit.sh sync-topbinz
+
+  deploy:
+    needs: sync
+    if: needs.sync.outputs.changed == 'true'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/deploy.yml

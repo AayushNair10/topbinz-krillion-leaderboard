@@ -24,6 +24,7 @@ for attempt in 1 2 3 4 5; do
 
   if git push --quiet origin HEAD:main; then
     cat "$SUMMARY_FILE" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+    echo "changed=true" >> "${GITHUB_OUTPUT:-/dev/null}"
     exit 0
   fi
   echo "Someone else updated the scoreboard at the same time. Retrying ($attempt/5)…"

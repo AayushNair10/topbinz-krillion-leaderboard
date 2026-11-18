@@ -2,12 +2,17 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
+  LeagueError,
   UserError,
   addPlayer,
   addResults,
   addScores,
+  normalizeLeagueCode,
   parseScoreList,
   parseShareText,
+  readLeague,
+  syncLeague,
+  topbinzDay,
   removeEntry,
   resolveDate,
   safe,
@@ -216,6 +221,84 @@ test('the real config dates puzzles correctly', () => {
   const day = (text) => parseShareText(real, text)[0].date;
   assert.equal(day('TOPBINZ #20 · 410 pts'), '2026-11-18');
   assert.equal(day('Krillion #126 🦐 420'), '2026-11-18');
+});
+
+// Shaped like the response TopBinz's own league page reads (members + standings.today.rows).
+const leagueConfig = {
+  ...config,
+  players: [
+    { id: 'aayush', name: 'Aayush' },
+    { id: 'sam-b', name: 'Sam B', topbinz: 'sammy' },
+  ],
+};
+const leagueBody = (rows) => ({
+  name: 'Sunday League',
+  owner: 'p1',
+  members: {
+    p1: { name: 'AAYUSH', pl: 'messi', h: '' },
+    p2: { name: 'sammy', pl: 'kane' },
+    p3: { name: 'Stranger', pl: 'saka' },
+    p4: { name: 'aayush', pl: 'messi' }, // same person, second device
+  },
+  standings: { today: { rows }, week: { start: '2026-11-16', end: '2026-11-22', rows: [] }, month: { month: '2026-11', rows: [] } },
+});
+const DAY_ROWS = [
+  { pid: 'p1', score: 410 },
+  { pid: 'p2', score: 380 },
+  { pid: 'p3', score: 500 },
+  { pid: 'p4', score: 300 },
+  { pid: 'p5', score: 200 }, // left the league: no member entry
+  { pid: 'p6', score: '999' }, // malformed
+  { pid: 'p7', score: 999999 }, // impossible
+];
+
+test('league: matches members by alias or name and keeps the best of duplicate devices', () => {
+  const r = readLeague(leagueConfig, leagueBody(DAY_ROWS));
+  assert.deepEqual(r.scores.sort((a, b) => a.player.localeCompare(b.player)), [
+    { player: 'aayush', score: 410 },
+    { player: 'sam-b', score: 380 },
+  ]);
+  assert.equal(r.played, 7);
+  assert.equal(r.unmatched, 2);
+  assert.equal(r.skipped, 2);
+});
+
+test('league: sync records Normal scores, is idempotent and corrects typed scores', () => {
+  const typed = addScores(leagueConfig, empty, { gameMode: 'topbinz/normal', scoresText: 'Aayush 400', dateText: '2026-11-18', now: NOW });
+  const first = syncLeague(leagueConfig, typed.data, leagueBody(DAY_ROWS), '2026-11-18');
+  assert.deepEqual(first.changes.map((c) => [c.name, c.score, c.previous]).sort(), [
+    ['Aayush', 410, 400],
+    ['Sam B', 380, undefined],
+  ]);
+  assert.ok(first.data.entries.every((e) => e.game === 'topbinz' && e.mode === 'normal' && e.date === '2026-11-18'));
+  assert.deepEqual(validateScores(leagueConfig, first.data, '2026-11-18'), []);
+  const again = syncLeague(leagueConfig, first.data, leagueBody(DAY_ROWS), '2026-11-18');
+  assert.equal(again.changes.length, 0);
+  assert.equal(again.data.entries.length, 2);
+});
+
+test('league: errors and changed formats are reported, not guessed at', () => {
+  assert.throws(() => readLeague(leagueConfig, { error: 'Code not found' }), (e) => e instanceof LeagueError && /doesn't exist/.test(e.message));
+  assert.throws(() => readLeague(leagueConfig, { name: 'x', members: {} }), (e) => e instanceof LeagueError && /changed shape/.test(e.message));
+  assert.throws(() => readLeague(leagueConfig, '<html>'), LeagueError);
+  assert.deepEqual(readLeague(leagueConfig, leagueBody([])).scores, []);
+});
+
+test('league: day rolls over at 02:00 UTC and codes are normalized', () => {
+  assert.equal(topbinzDay(new Date('2026-11-18T01:59:00Z')), '2026-11-17');
+  assert.equal(topbinzDay(new Date('2026-11-18T02:00:00Z')), '2026-11-18');
+  assert.equal(normalizeLeagueCode(' abc123 '), 'ABC123');
+  userError(() => normalizeLeagueCode('AB/../C'), /league code/);
+  userError(() => normalizeLeagueCode(''), /league code/);
+});
+
+test('players can carry a TopBinz league nickname', () => {
+  assert.deepEqual(addPlayer(leagueConfig, 'Riya', 'riya_k10').player, { id: 'riya', name: 'Riya', topbinz: 'riya_k10' });
+  assert.deepEqual(addPlayer(leagueConfig, 'Riya', 'RIYA').player, { id: 'riya', name: 'Riya' }); // same as name: not stored
+  userError(() => addPlayer(leagueConfig, 'Riya', 'Sammy'), /already uses that TopBinz league nickname/);
+  const dup = { ...leagueConfig, players: [...leagueConfig.players, { id: 'x', name: 'X', topbinz: 'SAMMY' }] };
+  assert.match(validateConfig(dup).join(), /used by two players/);
+  assert.match(validateConfig({ ...leagueConfig, players: [{ id: 'x', name: 'X', topbinz: 'a\u0000b' }] }).join(), /league nickname/);
 });
 
 test('safe() strips anything that could break out of a log line', () => {

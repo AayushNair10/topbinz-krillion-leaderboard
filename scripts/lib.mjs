@@ -5,6 +5,8 @@ import { modeKey, todayIn } from '../site/leaderboard.js';
 export const ID_RE = /^[0-9a-f]{8}$/;
 export const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,23}$/;
 export const PLAYER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 _.-]{0,23}$/;
+// TopBinz lets people type any nickname, so allow anything printable (it is only used for matching).
+const LEAGUE_NICK_RE = /^[^\p{Cc}\p{Cf}]{1,24}$/u;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const REPO_RE = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 const EARLIEST_DATE = '2020-01-01';
@@ -103,11 +105,17 @@ export function validateConfig(config) {
   } else {
     const ids = new Set();
     const names = new Set();
+    const aliases = new Set();
     config.players.forEach((p, i) => {
       const at = `config.players[${i}]`;
       if (!isPlainObject(p)) return errors.push(`${at} must be an object`);
-      const extra = Object.keys(p).filter((k) => k !== 'id' && k !== 'name');
-      if (extra.length) errors.push(`${at} has unexpected fields: ${extra.join(', ')} (only id and name are allowed)`);
+      const extra = Object.keys(p).filter((k) => !['id', 'name', 'topbinz'].includes(k));
+      if (extra.length) errors.push(`${at} has unexpected fields: ${extra.join(', ')} (only id, name and topbinz are allowed)`);
+      if (p.topbinz !== undefined) {
+        if (typeof p.topbinz !== 'string' || !LEAGUE_NICK_RE.test(p.topbinz)) errors.push(`${at}.topbinz must be a 1–24 character TopBinz league nickname`);
+        else if (aliases.has(nameKey(p.topbinz))) errors.push(`${at}.topbinz "${p.topbinz}" is used by two players`);
+        else aliases.add(nameKey(p.topbinz));
+      }
       if (typeof p.id !== 'string' || !SLUG_RE.test(p.id)) errors.push(`${at}.id must be lowercase letters, digits or dashes`);
       else if (ids.has(p.id)) errors.push(`${at}.id "${p.id}" is duplicated`);
       else ids.add(p.id);
@@ -385,8 +393,9 @@ export function removeEntry(data, idText) {
   return { data: { ...data, entries: data.entries.filter((e) => e.id !== id) }, removed };
 }
 
-export function addPlayer(config, nameText) {
+export function addPlayer(config, nameText, topbinzText = '') {
   const name = String(nameText ?? '').trim().replace(/\s+/g, ' ');
+  const topbinz = String(topbinzText ?? '').trim();
   if (!PLAYER_NAME_RE.test(name)) {
     throw new UserError('Player names must be 1–24 characters: letters, digits, spaces, dots, dashes or underscores. Use a nickname, not a full name.');
   }
@@ -395,5 +404,94 @@ export function addPlayer(config, nameText) {
   const clash = config.players.find((p) => p.id === id || nameKey(p.name) === nameKey(name));
   if (clash) throw new UserError(`"${safe(name)}" is too close to the existing player "${clash.name}".`);
   const player = { id, name };
+  if (topbinz && nameKey(topbinz) !== nameKey(name)) {
+    if (!LEAGUE_NICK_RE.test(topbinz)) throw new UserError('The TopBinz league nickname must be 1–24 characters.');
+    const taken = config.players.find((p) => p.topbinz && nameKey(p.topbinz) === nameKey(topbinz));
+    if (taken) throw new UserError(`${taken.name} already uses that TopBinz league nickname.`);
+    player.topbinz = topbinz;
+  }
   return { config: { ...config, players: [...config.players, player] }, player };
+}
+
+// ---------------------------------------------------------------------------
+// TopBinz league sync
+//
+// TopBinz has no public API. Its own page reads a league's table from
+//   GET https://topbinz-api.topbinz.workers.dev/league/<CODE>?d=<YYYY-MM-DD>
+// which needs no login, only the 6-letter league code. Each row of
+// standings.today.rows is one member's server-verified Daily Strike (Normal)
+// score for that day; members maps each row's pid to the nickname they typed.
+// It is undocumented, so the response is treated as untrusted and checked field by field.
+// ---------------------------------------------------------------------------
+
+export const TOPBINZ_API = 'https://topbinz-api.topbinz.workers.dev';
+const LEAGUE_CODE_RE = /^[A-Za-z0-9]{4,32}$/;
+
+/** TopBinz days roll over at 02:00 UTC (see resetShift in its code). */
+export function topbinzDay(now = new Date()) {
+  return new Date(now.getTime() - 2 * 3_600_000).toISOString().slice(0, 10);
+}
+
+export function normalizeLeagueCode(text) {
+  const code = String(text ?? '').trim().toUpperCase();
+  if (!LEAGUE_CODE_RE.test(code)) throw new UserError('The TOPBINZ_LEAGUE secret should be your league code (the 6 letters you join with).');
+  return code;
+}
+
+/** Leaderboard player for a league nickname: their `topbinz` alias first, then their name. */
+export function findLeaguePlayer(config, nick) {
+  const k = nameKey(nick);
+  if (!k) return undefined;
+  return config.players.find((p) => p.topbinz && nameKey(p.topbinz) === k) ?? findPlayer(config, nick);
+}
+
+/** An error meaning the league data couldn't be used (as opposed to bad user input). */
+export class LeagueError extends Error {}
+
+/**
+ * Pull each matched player's score out of a league response.
+ * Returns { scores: [{player, score}], played, unmatched, skipped }.
+ */
+export function readLeague(config, body) {
+  if (!isPlainObject(body)) throw new LeagueError('TopBinz sent something that isn\'t a league.');
+  if (body.error !== undefined) {
+    throw new LeagueError(/not found|no such/i.test(String(body.error)) ? 'TopBinz says that league code doesn\'t exist. Check the TOPBINZ_LEAGUE secret.' : 'TopBinz returned an error for the league.');
+  }
+  const rows = body.standings?.today?.rows;
+  if (!Array.isArray(rows)) throw new LeagueError('The league data has changed shape (no standings.today.rows). The sync needs updating.');
+  const members = isPlainObject(body.members) ? body.members : {};
+  const game = config.games.find((g) => g.id === 'topbinz');
+
+  const best = new Map();
+  let unmatched = 0;
+  let skipped = 0;
+  for (const row of rows) {
+    if (!isPlainObject(row) || typeof row.pid !== 'string' || !Number.isSafeInteger(row.score) || row.score < 0 || row.score > game.maxScore) {
+      skipped += 1;
+      continue;
+    }
+    const member = members[row.pid];
+    const nick = isPlainObject(member) && typeof member.name === 'string' ? member.name : '';
+    const player = findLeaguePlayer(config, nick);
+    if (!player) {
+      unmatched += 1;
+      continue;
+    }
+    // Someone who joined from two devices shows up twice; keep their best score.
+    best.set(player.id, Math.max(best.get(player.id) ?? 0, row.score));
+  }
+  return { scores: [...best].map(([player, score]) => ({ player, score })), played: rows.length, unmatched, skipped };
+}
+
+/**
+ * Record league scores as TopBinz Normal for `day`. The league's score is
+ * server-verified, so it overwrites a different score typed in by hand.
+ */
+export function syncLeague(config, data, body, day) {
+  const league = readLeague(config, body);
+  const items = league.scores
+    .filter(({ player, score }) => !data.entries.some((e) => e.date === day && e.player === player && e.game === 'topbinz' && e.mode === 'normal' && e.score === score))
+    .map(({ player, score }) => ({ player, game: 'topbinz', mode: 'normal', date: day, score }));
+  const { data: next, changes } = applyEntries(config, data, items, true);
+  return { data: next, changes, league };
 }

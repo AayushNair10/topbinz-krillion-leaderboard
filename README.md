@@ -21,9 +21,27 @@ It's a static site on GitHub Pages. Scores live in [`site/data/scores.json`](sit
 
 ## Adding scores
 
-Neither game has a public API, so scores come in one of two ways. Both work in a phone browser.
+Neither game has a public API. **TopBinz Normal** scores come in automatically through your TopBinz league. Everything else (TopBinz Niche and Krillion) is pasted or typed in, which works in a phone browser.
 
-### Paste a result (easiest)
+### Automatic: TopBinz league (Normal only)
+
+TopBinz has built-in **Leagues**. Once you're in one, your Daily Strike score is sent to the league when you finish. The [Sync TopBinz league](https://github.com/AayushNair10/topbinz-krillion-leaderboard/actions/workflows/sync-topbinz.yml) workflow reads your league's table every two hours, plus twice shortly before TopBinz's 02:00 UTC daily reset. It records new scores as **TopBinz Normal**.
+
+Setup, once:
+
+1. In TopBinz, open **Leagues**, then create a league and have everyone join with its 6-letter code (or use the one you already have).
+2. Save the code as a secret: **Settings → Secrets and variables → Actions → New repository secret**, name `TOPBINZ_LEAGUE`, value the code. It stays out of the repo and the logs, since anyone with the code could join your league.
+3. Each friend's TopBinz league nickname must match their leaderboard name (not case-sensitive). If it doesn't, give it in the optional "TopBinz league nickname" box when you **Add player**.
+
+Good to know:
+
+- League scores are only TopBinz **Normal**, because the league doesn't get Niche. Paste Niche and Krillion results as below.
+- A league score overwrites a different Normal score typed in by hand for the same day, since TopBinz has verified it.
+- League members who aren't on the leaderboard are skipped. The run log shows how many, but not their names.
+- This uses TopBinz's undocumented internal server, the same one its own league page uses. It could break if TopBinz changes it. If the league data changes shape, the run fails with an error saying so.
+- GitHub pauses scheduled workflows in public repos after 60 days without commits, so a long break from playing may need a manual **Run workflow** to restart it.
+
+### Paste a result
 
 1. On the game's daily results screen, tap **Share** (or **Copy**).
 2. Go to **[Actions → Paste results](https://github.com/AayushNair10/topbinz-krillion-leaderboard/actions/workflows/paste-results.yml)** and click **Run workflow**.
@@ -47,7 +65,7 @@ If a run fails, open it and the error at the top says what was wrong, e.g. an un
 
 | Workflow | Use it to |
 | --- | --- |
-| [Add player](https://github.com/AayushNair10/topbinz-krillion-leaderboard/actions/workflows/add-player.yml) | Add a friend to the roster. **Use a nickname**, because the site and repo are public. |
+| [Add player](https://github.com/AayushNair10/topbinz-krillion-leaderboard/actions/workflows/add-player.yml) | Add a friend to the roster. **Use a nickname**, because the site and repo are public. Add their TopBinz league nickname if it's different. |
 | [Remove entry](https://github.com/AayushNair10/topbinz-krillion-leaderboard/actions/workflows/remove-entry.yml) | Delete one score by its ID (shown on the site's **History** tab), then add the right one. |
 
 ### Letting friends add their own scores
@@ -70,7 +88,8 @@ npm run validate  # check the data files
 
 ## Security and privacy
 
-- **No secrets anywhere.** No backend, no database, no API keys, no tokens in the code. Writes go through GitHub, so you need a GitHub login and write access to this repo. Turn on 2FA for your GitHub account.
+- **No secrets in the code.** No backend, no database, no API keys, no tokens in the repo. Writes go through GitHub, so you need a GitHub login and write access to this repo. Turn on 2FA for your GitHub account.
+- **The TopBinz league code** is the only secret. It lives in GitHub's encrypted Actions secrets, is only passed to the sync step, and GitHub masks it in logs. The sync only reads (one GET request per run, no login). It treats TopBinz's response as untrusted: each score is checked, and nicknames are only used for matching, never saved or logged.
 - **Locked-down workflows.** Each job gets only the token permissions it needs. Form inputs reach the script through environment variables (never pasted into shell commands) and are strictly validated: known players only, whole-number scores within the game's max, real dates. Every third-party action is pinned to a full commit SHA, and Dependabot proposes updates monthly.
 - **Repo settings.** Only GitHub-made actions are allowed and they must be SHA-pinned. The default workflow token is read-only. Pull requests from outside contributors need approval before any workflow runs. `main` can't be force-pushed or deleted. Secret scanning with push protection is on.
 - **The site** loads nothing from other domains: no analytics, fonts, CDNs or cookies. A strict Content-Security-Policy allows only its own files. Names are rendered as plain text, never as HTML. It's also marked `noindex` to keep it out of search engines.

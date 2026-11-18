@@ -9,6 +9,10 @@ on:
         description: Nickname (1–24 letters, digits, spaces, dots, dashes or underscores)
         type: string
         required: true
+      topbinz:
+        description: Their nickname in the TopBinz league, if it's different (optional)
+        type: string
+        required: false
 
 permissions: {}
 
@@ -28,6 +32,7 @@ jobs:
       - name: Add player
         env:
           PLAYER_NAME: ${{ inputs.name }}
+          PLAYER_TOPBINZ: ${{ inputs.topbinz }}
           ACTOR: ${{ github.actor }}
         run: bash scripts/ci-commit.sh add-player
 
